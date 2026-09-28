@@ -1,4 +1,4 @@
-# Dietitian System
+# NutriCheck – Hospital Dietitian Management System
 
 A hospital dietitian management system for managing food products, meals, and staff.
 

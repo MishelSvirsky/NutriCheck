@@ -1,0 +1,15 @@
+Flask
+flask-cors
+gunicorn
+psycopg2-binary
+Flask-SQLAlchemy
+openai
+python-dotenv
+pgvector
+supabase
+pandas
+requests
+PyJWT
+bcrypt
+openpyxl
+numpy

@@ -1,0 +1,586 @@
+import React, { useState, useEffect } from "react";
+import type { SensitivityData, CategoryData, TextureData } from "../../types";
+import OutlierWarningPopup, { type OutlierFlag } from "../products/OutlierWarningPopup";
+
+interface AddProductFormProps {
+  onProductAdded: () => void;
+  onCancel: () => void;
+}
+
+const AddProductForm: React.FC<AddProductFormProps> = ({
+  onProductAdded,
+  onCancel,
+}) => {
+  const [formData, setFormData] = useState({
+    name: "",
+    category_id: 0,
+    image: "",
+    iddsi: 0,
+    calories: 0,
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+    sugares: 0,
+    sodium: 0,
+    contains: [] as string[],
+    mayContain: [] as string[],
+    texture_id: 0,
+    company: "",
+    textureNotes: "",
+    allergyNotes: "",
+    forbiddenFor: "",
+  });
+
+  const [categories, setCategories] = useState<CategoryData[]>([]);
+  const [textures, setTextures] = useState<TextureData[]>([]);
+  const [sensitivities, setSensitivities] = useState<SensitivityData[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [outlierFlags, setOutlierFlags] = useState<OutlierFlag[] | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      fetch(`${import.meta.env.VITE_API_URL}/api/categories`).then((res) =>
+        res.json(),
+      ),
+      fetch(`${import.meta.env.VITE_API_URL}/api/sensitivities`).then((res) =>
+        res.json(),
+      ),
+      fetch(`${import.meta.env.VITE_API_URL}/api/texture`).then((res) =>
+        res.json(),
+      ),
+    ])
+      .then(([catsData, sensData, textData]) => {
+        setCategories(catsData);
+        setSensitivities(sensData);
+        setTextures(textData);
+        if (catsData.length > 0) {
+          setFormData((prev) => ({ ...prev, category_id: catsData[0].id }));
+        }
+      })
+      .catch((err) => console.error("Error fetching data for form:", err));
+  }, []);
+
+  const handleInputChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+  ) => {
+    const { name, value, type } = e.target as HTMLInputElement;
+    setFormData((prev) => {
+      let parsedValue: string | number = value;
+
+      if (
+        type === "number" ||
+        name === "category_id" ||
+        name === "iddsi" ||
+        name === "texture_id"
+      ) {
+        // If the user clears the input completely, store 0 so math doesn't break,
+        // but handle string conversion cleanly.
+        parsedValue = value === "" ? 0 : Number(value);
+      }
+
+      return {
+        ...prev,
+        [name]: parsedValue,
+      };
+    });
+  };
+
+  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    if (e.target.value === "0") {
+      e.target.value = "";
+    }
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    if (e.target.value === "") {
+      const name = e.target.name;
+      setFormData((prev) => ({ ...prev, [name]: 0 }));
+    }
+  };
+
+  const handleContainsChange = (sensName: string) => {
+    setFormData((prev) => {
+      const current = prev.contains;
+      if (current.includes(sensName)) {
+        return {
+          ...prev,
+          contains: current.filter((item) => item !== sensName),
+        };
+      } else {
+        return { ...prev, contains: [...current, sensName] };
+      }
+    });
+  };
+
+  const handleMayContainChange = (sensName: string) => {
+    setFormData((prev) => {
+      const current = prev.mayContain;
+      if (current.includes(sensName)) {
+        return {
+          ...prev,
+          mayContain: current.filter((item) => item !== sensName),
+        };
+      } else {
+        return { ...prev, mayContain: [...current, sensName] };
+      }
+    });
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const data = new FormData();
+    data.append("image", file);
+
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/upload`, {
+        method: "POST",
+        body: data,
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
+
+      setFormData((prev) => ({ ...prev, image: result.imageUrl }));
+    } catch (err: any) {
+      alert("שגיאה בהעלאת תמונה: " + err.message);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const doSave = async () => {
+    setOutlierFlags(null);
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/products`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+      setFormData({
+        name: "", category_id: categories.length > 0 ? categories[0].id : 0,
+        image: "", iddsi: 0, calories: 0, protein: 0, carbs: 0, fat: 0,
+        sugares: 0, sodium: 0, contains: [], mayContain: [], texture_id: 0,
+        company: "", textureNotes: "", allergyNotes: "", forbiddenFor: "",
+      });
+      onProductAdded();
+    } catch (err: any) {
+      alert("Error adding product: " + err);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setValidationError(null);
+
+    if (!formData.name.trim()) { setValidationError("נא למלא את שם המוצר."); return; }
+    if (!formData.category_id) { setValidationError("נא לבחור קטגוריה למוצר."); return; }
+    if (!formData.texture_id)  { setValidationError("נא לבחור מרקם מנה (חובה). לא ניתן לשמור ללא בחירת מרקם."); return; }
+
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/products/check-outlier`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+      const result = await res.json();
+      if (!result.skip && result.flagged?.length > 0) {
+        setOutlierFlags(result.flagged);
+        return;
+      }
+    } catch { /* if check fails, proceed anyway */ }
+
+    await doSave();
+  };
+
+  return (
+    <>
+    {outlierFlags && (
+      <OutlierWarningPopup
+        flags={outlierFlags}
+        onCancel={() => setOutlierFlags(null)}
+        onConfirm={doSave}
+      />
+    )}
+    <div className="bg-white p-6 rounded-xl shadow-md mb-8 border border-gray-100">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-bold">פרטי מוצר חדש</h2>
+        <button
+          onClick={onCancel}
+          className="text-gray-500 hover:text-red-500 font-medium transition-colors"
+        >
+          סגור
+        </button>
+      </div>
+      <form
+        onSubmit={handleSubmit}
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+      >
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            שם המנה
+          </label>
+          <input
+            required
+            type="text"
+            name="name"
+            value={formData.name}
+            onChange={handleInputChange}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            קטגוריה
+          </label>
+          <select
+            name="category_id"
+            value={formData.category_id}
+            onChange={handleInputChange}
+            className="w-full border border-gray-300 p-2 rounded-md"
+            required
+          >
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            שם חברה / מותג
+          </label>
+          <input
+            type="text"
+            name="company"
+            value={formData.company}
+            onChange={handleInputChange}
+            className="w-full border border-gray-300 p-2 rounded-md"
+            placeholder="לדוגמא: טרה, תנובה..."
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            מרקם מנה
+          </label>
+          <select
+            name="texture_id"
+            value={formData.texture_id}
+            onChange={handleInputChange}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          >
+            <option value={0}>יש לבחור מרקם</option>
+            {textures.map((txt) => (
+              <option key={txt.id} value={txt.id}>
+                {txt.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            תמונת מוצר (קישור או העלאה)
+          </label>
+          <div className="flex flex-col gap-3">
+            <input
+              type="text"
+              name="image"
+              placeholder="הכנס קישור לתמונה (URL)..."
+              value={formData.image}
+              onChange={handleInputChange}
+              className="w-full border border-gray-300 p-2 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <div className="flex items-center gap-4">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                disabled={isUploading}
+                className="w-full text-sm text-gray-500
+                  file:mr-4 file:py-2 file:px-4
+                  file:rounded-md file:border-0
+                  file:text-sm file:font-semibold
+                  file:bg-blue-50 file:text-blue-700
+                  hover:file:bg-blue-100 disabled:opacity-50"
+              />
+              {isUploading && (
+                <span className="text-sm text-gray-500 shrink-0">מעלה...</span>
+              )}
+            </div>
+          </div>
+          {formData.image && (
+            <div className="mt-3">
+              <span className="text-xs text-gray-500 block mb-1">
+                תצוגה מקדימה:
+              </span>
+              <img
+                src={formData.image}
+                alt="Preview"
+                className="h-20 w-20 object-cover rounded-md shadow-sm border border-gray-200"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src =
+                    "https://placehold.co/100x100?text=Error";
+                }}
+              />
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            מרקם (IDDSI)
+          </label>
+          <select
+            name="iddsi"
+            value={formData.iddsi}
+            onChange={handleInputChange}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          >
+            <option value={0}>0 - דליל</option>
+            <option value={1}>1 - סמיך קלות</option>
+            <option value={2}>2 - סמיך במידה</option>
+            <option value={3}>3 - סמיך למדי</option>
+            <option value={4}>4 - נוזלי סמיך / מחיתי</option>
+            <option value={5}>5 - טחון ורך</option>
+            <option value={6}>6 - רך לחיתוך</option>
+            <option value={7}>7 - רגיל</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            הערות מרקם
+          </label>
+          <input
+            type="text"
+            name="textureNotes"
+            value={formData.textureNotes}
+            onChange={handleInputChange}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            הערות אלרגיות
+          </label>
+          <input
+            type="text"
+            name="allergyNotes"
+            value={formData.allergyNotes}
+            onChange={handleInputChange}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            למי אסור
+          </label>
+          <input
+            type="text"
+            name="forbiddenFor"
+            value={formData.forbiddenFor}
+            onChange={handleInputChange}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            קלוריות
+          </label>
+          <input
+            type="number"
+            name="calories"
+            value={formData.calories}
+            onChange={handleInputChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            חלבון (גרם)
+          </label>
+          <input
+            type="number"
+            step="0.1"
+            name="protein"
+            value={formData.protein}
+            onChange={handleInputChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            פחמימות (גרם)
+          </label>
+          <input
+            type="number"
+            step="0.1"
+            name="carbs"
+            value={formData.carbs}
+            onChange={handleInputChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            שומן (גרם)
+          </label>
+          <input
+            type="number"
+            step="0.1"
+            name="fat"
+            value={formData.fat}
+            onChange={handleInputChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            סוכר (גרם)
+          </label>
+          <input
+            type="number"
+            step="0.1"
+            name="sugares"
+            value={formData.sugares}
+            onChange={handleInputChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            נתרן (מ"ג)
+          </label>
+          <input
+            type="number"
+            step="0.1"
+            name="sodium"
+            value={formData.sodium}
+            onChange={handleInputChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            className="w-full border border-gray-300 p-2 rounded-md"
+          />
+        </div>
+
+        {/* Sensitivities/Allergies Selection */}
+        <div className="col-span-1 md:col-span-2 lg:col-span-3 mt-2 space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              מכיל (רגישויות / אלרגיות / מאפיינים)
+            </label>
+            <div className="flex flex-wrap gap-3 p-4 border border-gray-200 rounded-md bg-gray-50">
+              {sensitivities.length === 0 ? (
+                <span className="text-gray-500 text-sm">
+                  לא נמצאו רגישויות מוגדרות במערכת
+                </span>
+              ) : (
+                sensitivities.map((sens) => (
+                  <label
+                    key={sens.id}
+                    className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-full border border-gray-200 shadow-sm hover:border-indigo-300 transition-colors"
+                  >
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                      checked={formData.contains.includes(sens.name)}
+                      onChange={() => handleContainsChange(sens.name)}
+                    />
+                    <span className="text-sm text-gray-800 select-none">
+                      {sens.name}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              עלול להכיל (רגישויות / אלרגיות / מאפיינים)
+            </label>
+            <div className="flex flex-wrap gap-3 p-4 border border-gray-200 rounded-md bg-gray-50">
+              {sensitivities.length === 0 ? (
+                <span className="text-gray-500 text-sm">
+                  לא נמצאו רגישויות מוגדרות במערכת
+                </span>
+              ) : (
+                sensitivities.map((sens) => (
+                  <label
+                    key={`may-${sens.id}`}
+                    className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-full border border-gray-200 shadow-sm hover:border-amber-300 transition-colors"
+                  >
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 text-amber-500 rounded focus:ring-amber-500 cursor-pointer"
+                      checked={formData.mayContain.includes(sens.name)}
+                      onChange={() => handleMayContainChange(sens.name)}
+                    />
+                    <span className="text-sm text-gray-800 select-none">
+                      {sens.name}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="col-span-full pt-4 flex flex-col gap-3">
+          {validationError && (
+            <div className="bg-red-50 text-red-600 p-3 rounded-lg border border-red-100 flex items-center gap-2 animate-fade-in-up">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5 shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+              <span className="font-medium text-sm">{validationError}</span>
+            </div>
+          )}
+          <button
+            type="submit"
+            className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg shadow-md w-full md:w-auto transition-colors"
+          >
+            שמור מוצר במערכת
+          </button>
+        </div>
+      </form>
+    </div>
+    </>
+  );
+};
+
+export default AddProductForm;
